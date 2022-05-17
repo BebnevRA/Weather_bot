@@ -1,103 +1,192 @@
 import datetime
 
-from telebot import types
-
 from src.open_weather.api import OpenWeather
 from src.tg.config import COUNT_FOR_BAN
 from src.tg.bot import tg_bot
 from src.tg import messages
-from src import db_check_ip as db, db_ban_list
+from src import db_check_ip, db_ban_list, db_schedule
 from src.tg import keyboards
 
 
 @tg_bot.message_handler(commands=["start"])
 def start(m):
-    tg_bot.send_message(m.chat.id, messages.HELLO_MESSAGE,
-                        reply_markup=keyboards.start_keyboard)
+    tg_bot.send_message(m.chat.id, text=messages.HELLO_MESSAGE,
+                        reply_markup=keyboards.default_keyboard())
 
 
-@tg_bot.message_handler(commands=["schedule"])
-def schedule(m):
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    item1 = types.KeyboardButton("1")
-    item2 = types.KeyboardButton("2")
-    item3 = types.KeyboardButton("3")
-    item4 = types.KeyboardButton("4")
-    markup.row(item1, item2)
-    markup.add(item3)
-    tg_bot.send_message(m.chat.id, 'щас будем делать расписание',
-                        reply_markup=keyboards.test_keyboard)
+@tg_bot.message_handler(commands=["help"])
+def help(m):
+    tg_bot.send_message(m.chat.id, text=messages.HELP_MESSAGE)
 
 
-@tg_bot.callback_query_handler(func=lambda c: c.data == 'button1')
-def test(callback_query: types.CallbackQuery):
-    tg_bot.answer_callback_query(callback_query.id)
-    tg_bot.send_message(callback_query.from_user.id, 'take button1',
-                        reply_markup=keyboards.test_keyboard2)
+@tg_bot.message_handler(commands=["change_default_cities"])
+def change_default_cities(m):
+    msg = tg_bot.send_message(m.chat.id,
+                              text=messages.CHANGE_FIRST_CITY_MESSAGE)
+    tg_bot.register_next_step_handler(msg, change_first_city)
 
 
-@tg_bot.callback_query_handler(func=lambda c: c.data and c.data.startswith('but'))
-def test2(callback_query: types.CallbackQuery):
-    print(callback_query.data)
-    code = callback_query.data[-1]
-    print(code)
-    if code.isdigit():
-        code = int(code)
-    if code == 2:
-        tg_bot.answer_callback_query(callback_query.id, text='Нажата button2')
-    elif code == 3:
-        tg_bot.answer_callback_query(
-            callback_query.id,
-            text='Нажата button3.\nА этот текст может быть длиной до 200 символов 😉', show_alert=True)
+def change_first_city(m):
+    msg = tg_bot.send_message(m.chat.id,
+                              text=messages.CHANGE_SECOND_CITY_MESSAGE)
+    tg_bot.register_next_step_handler(msg, change_second_city, m.text)
+
+
+def change_second_city(m, first_city_name):
+    tg_bot.send_message(m.chat.id, text=messages.SUCCESS_MESSAGE,
+                        reply_markup=keyboards.default_keyboard(
+                                  first_city_name, m.text))
+
+
+@tg_bot.message_handler(commands=["my_schedule"])
+def my_schedule(m):
+    schedule = db_schedule.smembers(m.from_user.username)
+    if schedule:
+        message = 'Ваши уведомления:'
+        for time in schedule:
+            message += f'\n{time.decode("utf-8")}'
     else:
-        tg_bot.answer_callback_query(callback_query.id)
-    # tg_bot.send_message(callback_query.from_user.id, f'Нажата инлайн кнопка! code={code}')
+        message = messages.NO_SCHEDULE_MESSAGE
+
+    tg_bot.send_message(m.chat.id, text=message)
+
+
+@tg_bot.message_handler(commands=["new_schedule"])
+def new_schedule(m):
+    msg = tg_bot.send_message(m.chat.id,
+                              text=messages.ADDING_CITY_SCHEDULE_MESSAGE)
+    tg_bot.register_next_step_handler(msg, new_schedule_st2)
+
+
+def new_schedule_st2(m):
+    if m.text == 'Отмена' or m.text == 'отмена':
+        return
+
+    city_name = m.text
+    if OpenWeather(city_name).is_valid_city_name():
+        msg = tg_bot.send_message(m.chat.id,
+                                  text=messages.ADDING_TIME_SCHEDULE_MESSAGE)
+        tg_bot.register_next_step_handler(msg, new_schedule_st3, city_name)
+    else:
+        msg = tg_bot.send_message(m.chat.id,
+                                  text=messages.ERROR_ENTERING_MESSAGE)
+        tg_bot.register_next_step_handler(msg, new_schedule_st2)
+
+
+def new_schedule_st3(m, city_name):
+    if m.text == 'Отмена' or m.text == 'отмена':
+        return
+
+    try:
+        time_format = '%H.%M'
+        time = datetime.datetime.strptime(m.text, time_format)
+        db_schedule.sadd(m.from_user.username,
+                         f'{city_name}-{time.hour}.{time.minute}')
+        tg_bot.send_message(m.chat.id, text=messages.SUCCESS_MESSAGE)
+        # отправка задачи в сентри
+    except ValueError:
+        msg = tg_bot.send_message(m.chat.id,
+                                  text=messages.ERROR_ENTERING_MESSAGE)
+        tg_bot.register_next_step_handler(msg, new_schedule_st3, city_name)
+
+
+@tg_bot.message_handler(commands=["del_schedule"])
+def del_schedule(m):
+    schedules = db_schedule.smembers(m.from_user.username)
+    if not schedules:
+        tg_bot.send_message(m.chat.id, text=messages.NO_SCHEDULE_MESSAGE)
+        return
+
+    msg = tg_bot.send_message(m.chat.id,
+                              text=messages.DEL_SCHEDULE_CITY_MESSAGE)
+    tg_bot.register_next_step_handler(msg, del_schedule_st2, schedules)
+
+
+def del_schedule_st2(m, schedules):
+    if m.text == 'Отмена' or m.text == 'отмена':
+        return
+
+    del_city = m.text
+    city_counter = 0
+    for schedule in schedules:
+        if schedule.decode("utf-8").split('-')[0] == del_city:
+            city_counter += 1
+
+    if city_counter == 0:
+        msg = tg_bot.send_message(m.chat.id,
+                                  text=messages.NO_CITY_DEL_SCHEDULE_MESSAGE)
+        tg_bot.register_next_step_handler(msg, del_schedule_st2, schedules)
+    elif city_counter == 1:
+        for schedule in schedules:
+            if schedule.decode("utf-8").split('-')[0] == del_city:
+                db_schedule.srem(m.from_user.username, schedule)
+                # удаление задачи из сентри
+                tg_bot.send_message(m.chat.id,
+                                    text=messages.SUCCESS_MESSAGE)
+                return
+    else:
+        msg = tg_bot.send_message(m.chat.id,
+                                  text=messages.DEL_SCHEDULE_TIME_MESSAGE)
+        tg_bot.register_next_step_handler(msg, del_schedule_st3,
+                                          schedules, del_city)
+
+
+def del_schedule_st3(m, schedules, del_city):
+    if m.text == 'Отмена' or m.text == 'отмена':
+        return
+
+    try:
+        time_format = '%H.%M'
+        time = datetime.datetime.strptime(m.text, time_format)
+        result = db_schedule.srem(m.from_user.username,
+                                  f'{del_city}-{time.hour}.{time.minute}')
+        if result:
+            tg_bot.send_message(m.chat.id, text=messages.SUCCESS_MESSAGE)
+            # удаление задачи из сентри
+        else:
+            msg = tg_bot.send_message(m.chat.id,
+                                      text=messages.N0_SCHEDULE_VALUE_MESSAGE)
+            tg_bot.register_next_step_handler(msg, del_schedule_st3,
+                                              schedules, del_city)
+    except ValueError:
+        msg = tg_bot.send_message(m.chat.id,
+                                  text=messages.ERROR_ENTERING_MESSAGE)
+        tg_bot.register_next_step_handler(msg, del_schedule_st3,
+                                          schedules, del_city)
 
 
 @tg_bot.message_handler(content_types=['text'])
 def handle_text(message):
     if db_ban_list.get(message.from_user.username):
-        tg_bot.send_message(message.chat.id, messages.BAN_MESSAGE)
+        tg_bot.send_message(message.chat.id, text=messages.BAN_MESSAGE)
         return
     check_on_spam(username=message.from_user.username)
 
-    # print('id - ', message.chat.id)
-    # print('Никнейм - ', message.from_user.username)
-    # print('Имя - ', message.from_user.first_name)
-
     weather = OpenWeather(message.text)
-    if weather.error_message:
-        tg_bot.send_message(message.chat.id, weather.error_message)
-    else:
+    if weather.is_valid_city_name():
         tg_bot.send_message(message.chat.id, weather.weather_str(),
                             reply_markup=keyboards.share_button(
                                 weather.weather_str()))
+    else:
+        tg_bot.send_message(message.chat.id, weather.error_message)
 
 
 def check_on_spam(username):
-    # now = datetime.datetime.now()
-    # username = 'etroks'
-    #
-    # username_min = f'{username}-{now.minute}'
-    # count = r.incr(username_min)
-    # if count < COUNTFORBAN:
-    #     print(r.expire(username_min, 60))
-    # else:
-    #     print('BAN ' + username)
-
     now = datetime.datetime.now()
     time = f'{now.minute}.{now.second}'
 
-    db.lpush(username, time)
-    if db.llen(username) == COUNT_FOR_BAN:
-        delta = float(db.lindex(username, 0)) - float(db.lindex(username, -1))
+    db_check_ip.lpush(username, time)
+    if db_check_ip.llen(username) == COUNT_FOR_BAN:
+        delta = float(db_check_ip.lindex(username, 0)) - \
+                float(db_check_ip.lindex(username, -1))
 
         if delta < -59 or delta < 1:
             db_ban_list.set(username,
                             f'{now.day}.{now.month}.{now.year} '
-                            f'- {now.hour}.{now.minute}')
+                            f'- {now.hour}.{now.minute}',
+                            keepttl=60)
         else:
-            db.rpop(username)
+            db_check_ip.rpop(username)
 
 
 if __name__ == '__main__':

@@ -31,5 +31,11 @@ class OpenWeather:
         self.feels_like = res.json()['main']['feels_like']
         self.wind = res.json()['wind']['speed']
 
+    def is_valid_city_name(self):
+        if not self.error_message:
+            return True
+        else:
+            return False
+
     def weather_str(self):
         return f'В городе {self.city} сейчас {self.temp_now}°.'
