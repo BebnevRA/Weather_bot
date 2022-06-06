@@ -1,8 +1,12 @@
 __pycache__/
 *.py[cod]
 *$py.class
-
 .idea
 myvenv
+
 test.py
 celerybeat-schedule
+*.db
+
+docker-compose.yml
+Dockerfile

@@ -1,0 +1,16 @@
+version: "3.6"
+services:
+  redis_db:
+    image: redis
+    container_name: redis_db
+    ports:
+      - 6379:6379
+  tg_bot:
+    container_name: tg_bot
+    build: .
+    links:
+      - redis_db:dbserver
+    environment:
+      TG_BOT_TOKEN: '5295909082:AAGv4Ac6987pH5xXjCeSEm_wEeYtFud12yM'
+    ports:
+      - 8000:5000

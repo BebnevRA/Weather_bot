@@ -1,36 +1,25 @@
+from src.open_weather.api import OpenWeather
 from src.celery.app import celery_app
-import time
+from src import db_schedule
+from src.tg import tg_bot
 
-import telebot
 import datetime
 
 
 @celery_app.task
-def add(x, y):
-    return x + y
+def send_notification():
+    time_now = datetime.datetime.now()
+    time_now = f'{time_now.hour}.{time_now.minute}'
+    schedules = db_schedule.get_schedules_by_schedule_time(time_now)
+    for schedule in schedules:
+        city = schedule[2]
+        tg_bot.send_message(schedule[4], OpenWeather(city).weather_str())
 
 
 @celery_app.task
 def start_bot_task():
-    # from src.tg import test, bot
-    # bot.tg_bot.polling(none_stop=True, interval=0)
+    print(1)
     from src.tg import handlers
-    from src.tg.bot import tg_bot
+    print(2)
     tg_bot.polling(none_stop=True, interval=0)
-
-
-@celery_app.task
-def wait():
-    time.sleep(30)
-
-
-@celery_app.task
-def test_task():
-    now = datetime.datetime.now()
-    time = f'{now.hour}.{now.minute}.{now.second}'
-    bot = telebot.TeleBot('5295909082:AAGv4Ac6987pH5xXjCeSEm_wEeYtFud12yM')
-    bot.send_message('297452818', f'Сейчас уже {time}')
-    return True
-
-
-
+    print(3)

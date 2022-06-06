@@ -1,11 +1,10 @@
 import datetime
+import re
 
 from src.open_weather.api import OpenWeather
 from src.tg.config import COUNT_FOR_BAN
-from src.tg.bot import tg_bot
-from src.tg import messages
+from src.tg import tg_bot, messages, keyboards
 from src import db_check_ip, db_ban_list, db_schedule
-from src.tg import keyboards
 
 
 @tg_bot.message_handler(commands=["start"])
@@ -40,14 +39,13 @@ def change_second_city(m, first_city_name):
 
 @tg_bot.message_handler(commands=["my_schedule"])
 def my_schedule(m):
-    schedule = db_schedule.smembers(m.from_user.username)
-    if schedule:
+    schedules = db_schedule.get_schedules_by_username(m.from_user.username)
+    if schedules:
         message = 'Ваши уведомления:'
-        for time in schedule:
-            message += f'\n{time.decode("utf-8")}'
+        for schedule in schedules:
+            message += f'\n{schedule[2]}-{schedule[3]}'
     else:
         message = messages.NO_SCHEDULE_MESSAGE
-
     tg_bot.send_message(m.chat.id, text=message)
 
 
@@ -78,12 +76,20 @@ def new_schedule_st3(m, city_name):
         return
 
     try:
-        time_format = '%H.%M'
-        time = datetime.datetime.strptime(m.text, time_format)
-        db_schedule.sadd(m.from_user.username,
-                         f'{city_name}-{time.hour}.{time.minute}')
-        tg_bot.send_message(m.chat.id, text=messages.SUCCESS_MESSAGE)
-        # отправка задачи в сентри
+        if re.match(r"^[0-2][0-9].[0-5][0-9]$", m.text):
+            if db_schedule.get_schedule(username=m.from_user.username,
+                                        city=city_name,
+                                        schedule_time=m.text,
+                                        chat_id=m.chat.id):
+                tg_bot.send_message(m.chat.id, text=messages.SCHEDULE_ALREADY_EXIST)
+            else:
+                db_schedule.add_schedule(
+                    username=m.from_user.username, city=city_name,
+                    schedule_time=f'{m.text.split(".")[0]}.{m.text.split(".")[1]}',
+                    chat_id=m.chat.id)
+                tg_bot.send_message(m.chat.id, text=messages.SUCCESS_MESSAGE)
+        else:
+            tg_bot.send_message(m.chat.id, text=messages.ERROR_ENTERING_MESSAGE)
     except ValueError:
         msg = tg_bot.send_message(m.chat.id,
                                   text=messages.ERROR_ENTERING_MESSAGE)
@@ -92,7 +98,7 @@ def new_schedule_st3(m, city_name):
 
 @tg_bot.message_handler(commands=["del_schedule"])
 def del_schedule(m):
-    schedules = db_schedule.smembers(m.from_user.username)
+    schedules = db_schedule.get_schedules_by_username(m.from_user.username)
     if not schedules:
         tg_bot.send_message(m.chat.id, text=messages.NO_SCHEDULE_MESSAGE)
         return
@@ -109,7 +115,7 @@ def del_schedule_st2(m, schedules):
     del_city = m.text
     city_counter = 0
     for schedule in schedules:
-        if schedule.decode("utf-8").split('-')[0] == del_city:
+        if schedule[2] == del_city:
             city_counter += 1
 
     if city_counter == 0:
@@ -118,9 +124,9 @@ def del_schedule_st2(m, schedules):
         tg_bot.register_next_step_handler(msg, del_schedule_st2, schedules)
     elif city_counter == 1:
         for schedule in schedules:
-            if schedule.decode("utf-8").split('-')[0] == del_city:
-                db_schedule.srem(m.from_user.username, schedule)
-                # удаление задачи из сентри
+            if schedule[2] == del_city:
+                db_schedule.del_schedule_by_username_and_city(
+                    username=m.from_user.username, city=schedule[2])
                 tg_bot.send_message(m.chat.id,
                                     text=messages.SUCCESS_MESSAGE)
                 return
@@ -136,16 +142,18 @@ def del_schedule_st3(m, schedules, del_city):
         return
 
     try:
-        time_format = '%H.%M'
-        time = datetime.datetime.strptime(m.text, time_format)
-        result = db_schedule.srem(m.from_user.username,
-                                  f'{del_city}-{time.hour}.{time.minute}')
-        if result:
-            tg_bot.send_message(m.chat.id, text=messages.SUCCESS_MESSAGE)
-            # удаление задачи из сентри
+        if re.match(r"^[0-2][0-9].[0-5][0-9]$", m.text):
+            if db_schedule.del_schedule_by_username_city_time(
+                    username=m.from_user.username, city=del_city, time=m.text):
+                tg_bot.send_message(m.chat.id, text=messages.SUCCESS_MESSAGE)
+            else:
+                msg = tg_bot.send_message(m.chat.id,
+                                          text=messages.N0_SCHEDULE_VALUE_MESSAGE)
+                tg_bot.register_next_step_handler(msg, del_schedule_st3,
+                                                  schedules, del_city)
         else:
             msg = tg_bot.send_message(m.chat.id,
-                                      text=messages.N0_SCHEDULE_VALUE_MESSAGE)
+                                      text=messages.ERROR_ENTERING_MESSAGE)
             tg_bot.register_next_step_handler(msg, del_schedule_st3,
                                               schedules, del_city)
     except ValueError:
@@ -184,7 +192,8 @@ def check_on_spam(username):
             db_ban_list.set(username,
                             f'{now.day}.{now.month}.{now.year} '
                             f'- {now.hour}.{now.minute}',
-                            keepttl=60)
+                            ex=600)
+            db_check_ip.delete(username)
         else:
             db_check_ip.rpop(username)
 
