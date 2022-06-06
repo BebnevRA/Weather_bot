@@ -8,5 +8,3 @@ test.py
 celerybeat-schedule
 *.db
 
-docker-compose.yml
-Dockerfile
