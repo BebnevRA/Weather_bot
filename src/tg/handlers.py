@@ -2,7 +2,7 @@ import datetime
 import re
 
 from src.open_weather.api import OpenWeather
-from src.tg.config import COUNT_FOR_BAN
+from src.config import COUNT_FOR_BAN, TIMEZONE_OFFSET
 from src.tg import tg_bot, messages, keyboards
 from src import db_check_ip, db_ban_list, db_schedule
 
@@ -180,7 +180,7 @@ def handle_text(message):
 
 
 def check_on_spam(username):
-    now = datetime.datetime.now()
+    now = datetime.datetime.now(TIMEZONE_OFFSET)
     time = f'{now.minute}.{now.second}'
 
     db_check_ip.lpush(username, time)
@@ -199,4 +199,5 @@ def check_on_spam(username):
 
 
 if __name__ == '__main__':
-    tg_bot.polling(none_stop=True, interval=0)
+    print('start')
+    tg_bot.polling(none_stop=True)

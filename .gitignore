@@ -7,4 +7,7 @@ myvenv
 test.py
 celerybeat-schedule
 *.db
+postgres-data
 
+docker-compose.yml
+docker
