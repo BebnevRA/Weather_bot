@@ -1,4 +1,3 @@
-
 import redis
 
 from src.db_schedule import DBSchedule

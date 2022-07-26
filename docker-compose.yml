@@ -1,10 +1,20 @@
 version: "3.6"
 services:
+  tg_bot:
+    container_name: tg_bot
+    build:
+      context: .
+      dockerfile: ./docker/tg_bot/Dockerfile
+    environment:
+      TG_BOT_TOKEN: '5295909082:AAGv4Ac6987pH5xXjCeSEm_wEeYtFud12yM'
+  celery:
+    container_name: celery
+    build:
+      context: .
+      dockerfile: ./docker/celery/Dockerfile
   redis_db:
     image: redis
     container_name: redis_db
-    ports:
-      - 6379:6379
   postgres_db:
     image: postgres:14.2-alpine
     container_name: postgres_db
@@ -14,25 +24,3 @@ services:
       POSTGRES_PASSWORD: "0455"
     volumes:
       - ./postgres-data:/var/lib/postgresql/data
-  tg_bot:
-    container_name: tg_bot
-    build:
-      context: .
-      dockerfile: ./docker/tg_bot/Dockerfile
-    links:
-      - redis_db:redis_db
-      - postgres_db:postgres_db
-    environment:
-      TG_BOT_TOKEN: ''
-    ports:
-      - 8000:5000
-  celery:
-    container_name: celery
-    build:
-      context: .
-      dockerfile: ./docker/celery/Dockerfile
-    links:
-      - redis_db:redis_db
-      - postgres_db:postgres_db
-    ports:
-      - 8001:5001

@@ -14,5 +14,5 @@ COPY src src
 USER weather
 EXPOSE 5000
 
-CMD celery -A src.celery.tasks worker --loglevel=INFO --beat
+CMD sleep 5 && celery -A src.celery.tasks worker --loglevel=INFO --beat
 

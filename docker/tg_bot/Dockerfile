@@ -14,5 +14,5 @@ COPY src src
 USER weather
 EXPOSE 5000
 
-CMD python src/tg/handlers.py
+CMD sleep 5 && python src/tg/handlers.py
 
